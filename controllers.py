@@ -28,10 +28,9 @@ def simulate_dynamics(env, x, u, dt=1e-5):
       If you return x you will need to solve a different equation in
       your LQR controller.
     """
-    xdot = env.step(x,u)*dt
-    print(xdot.shape)
-    return xdot
-
+    #xdot = env.step(x,u)
+    #return xdot
+    return np.zeros(x.shape)
 
 def approximate_A(env, x, u, delta=1e-5, dt=1e-5):
     """Approximate A matrix using finite differences.
