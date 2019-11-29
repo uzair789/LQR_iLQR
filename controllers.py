@@ -1,9 +1,10 @@
 """LQR, iLQR and MPC."""
-
+import matplotlib.pyplot as plt
 import numpy as np
 import scipy.linalg as scp
 import copy
 import gym
+import os
 
 from deeprl_hw6.arm_env import TwoLinkArmEnv
 
@@ -32,8 +33,7 @@ def simulate_dynamics(env, x, u, dt=1e-5):
       If you return x you will need to solve a different equation in
       your LQR controller.
     """
-
-    env.state = x
+    env.state = copy.deepcopy(x)
     next_state, _, _, _ = env.step(u, dt)
     change = (next_state - x) / dt
     #return np.array(next_state)
@@ -72,9 +72,6 @@ def approximate_A(env, x, u, delta=1e-5, dt=1e-5):
         x_pos = simulate_dynamics(env, x_copy1, u)
         x_copy2[i] = x_copy2[i] - delta
         x_neg = simulate_dynamics(env, x_copy2, u)
-
-        print(x_pos, type(x_pos))
-        print('x_neg', x_neg, type(x_neg))
 
         A[:, i] = (x_pos - x_neg) / (2 * delta)
 
@@ -144,28 +141,45 @@ def calc_lqr_input(env, sim_env):
     u: np.array
       The command to execute at this point.
     """
-    u = env.action_space.sample()
-    u = np.array([0, 0])
-    x = env.state
+    #u = env.action_space.sample()
+    #print('sampled u',u)   
+    u = np.array([0.0, 0.0])
+    x = env.state 
+    g = env.goal
     A = approximate_A(sim_env, x, u)
     B = approximate_B(sim_env, x, u)
     Q = env.Q
     R = env.R
 
+    #print('x', x)
+    #print('g', g)
+    #print('x-g', x - g)
+
     P = scp.solve_continuous_are(A, B, Q, R)
 
-    print('A --', A.shape)
-    print('R --', R.shape)
-    print('B --', B.shape)
-    print('P --', P.shape)
-    print('x --', x.shape)
+    #print('A --', A.shape)
+    #print('R --', R.shape)
+    #print('B --', B.shape)
+    #print('P --', P.shape)
+    #print('x --', x.shape)
+
+    x_ = x - g
 
 
-    action_u = - np.linalg.inv(R).dot(B.T).dot(P).dot( x.reshape(-1,1)) # check the multiplication. element wise or dot product
-
+    action_u = - np.linalg.inv(R).dot(B.T).dot(P).dot( x_.reshape(-1,1)) # check the multiplication. element wise or dot product
+    #print('action --', action_u.shape)
     return action_u
     #return np.ones((2,))
 
+PATH = './plots'
+def plot_graph(data, title, xlabel, ylabel):
+        plt.figure(figsize=(12,5))
+        plt.title(title)
+        for i in range(data.shape[1]):
+            plt.plot(data[:, i])
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        plt.savefig(os.path.join(PATH, title+'.png'))
 
 
 if __name__ == '__main__':
@@ -176,10 +190,34 @@ if __name__ == '__main__':
     
     x = env.reset()
     done = False
+
+    q = []
+    qdot = []
+    actions = []
+ 
+    q.append(env.position)
+    qdot.append(env.velocity)
+
+    rewards = []
     while not done:
-        u = calc_lqr_input(env, sim_env)
-        next_x, r, done, _ = env.step(x , u)
-        x = next_x
-        print(r) 
+        u = calc_lqr_input(env, sim_env).squeeze()
+        print('selected_action ---', u.shape)
+        actions.append(u)
+        next_x, r, done, _ = env.step(u)
+        q.append(env.position)
+        qdot.append(env.velocity)
+        rewards.append(r) 
+
+    actions, q, qdot, rewards = np.array(actions), np.array(q, ndmin=2), np.array(qdot, ndmin=2), np.array(rewards, ndmin=2)
+    print('actions', actions, actions.shape)
+    print('q', q, q.shape)
+    print('qdot', qdot, qdot.shape)
+    print(rewards, rewards.shape)
+    plot_graph(actions, 'U_control', 'episode steps', 'control')
+    plot_graph(q, 'positions', 'episode steps', 'q')
+    plot_graph(qdot, 'velocity', 'episode steps', 'qdot')
+    plot_graph(rewards.T, 'rewards', 'episode steps', 'rewards')
+
+
 
 
