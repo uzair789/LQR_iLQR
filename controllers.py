@@ -96,7 +96,7 @@ def approximate_B(env, x, u, delta=1e-5, dt=1e-5):
       The B matrix for the dynamics at state x and command u.
     """
     B = np.zeros((x.shape[0], u.shape[0]))
-    for i in range(x.shape[0]):
+    for i in range(u.shape[0]):
       curr_act = u.copy()
       curr_act[i] = curr_act[i]+delta
       xplus = simulate_dynamics(env, x, curr_act, dt)
