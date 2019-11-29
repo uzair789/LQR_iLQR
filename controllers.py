@@ -1,6 +1,8 @@
 """LQR, iLQR and MPC."""
 
 import numpy as np
+import gym
+from  deeprl_hw6.arm_env import *
 
 
 def simulate_dynamics(env, x, u, dt=1e-5):
@@ -28,9 +30,10 @@ def simulate_dynamics(env, x, u, dt=1e-5):
       If you return x you will need to solve a different equation in
       your LQR controller.
     """
-    #xdot = env.step(x,u)
-    #return xdot
-    return np.zeros(x.shape)
+    xdot,reward,is_done,_ = env.step(u,dt)
+    #print(xdot,reward,id_done)
+    return xdot/dt
+    #return np.zeros(x.shape)
 
 def approximate_A(env, x, u, delta=1e-5, dt=1e-5):
     """Approximate A matrix using finite differences.
@@ -59,10 +62,10 @@ def approximate_A(env, x, u, delta=1e-5, dt=1e-5):
     
     for i in range(x.shape[0]):
       curr_x = x.copy()
-      curr_x[i] = curr[i]+delta
+      curr_x[i] = curr_x[i]+delta
       xplus = simulate_dynamics(env,curr_x,u,dt)
       curr_x = x.copy()
-      curr_x[i] = curr_x-delta
+      curr_x[i] = curr_x[i]-delta
       xminus = simulate_dynamics(env,curr_x,dt)
       diff = (xplus - xminus) / (2*delta)
       A[:,i] = diff
@@ -127,9 +130,26 @@ def calc_lqr_input(env, sim_env):
     u: np.array
       The command to execute at this point.
     """
-    
-    
-    K = scipy.linalg.solve_continuous_are() #arguments A,B,Q,R
-    # USE K TO FIND U
-    U = - K*state
+    x = env.state
+    u = np.zeros((2,))
+    A = approximate_A(sim_env,x,u)
+    B = approximate_B(sim_env,x,u)
+    Q = env.Q
+    R = env.R
+    K = scipy.linalg.solve_continuous_are(A,B,Q,R)
+    #xdot = simulate_dynamics(sim_env,x,u)*env.dt
+    xdot = x - env.goal()
+    prod = np.dot(K,xdot)
+    U = -np.dot(np.dot(np.linalg.inv(R),B.T),prod)
     return np.ones((2,))
+
+if __name__ == '__main__':
+
+  env = gym.make('TwoLinkArm-v0')
+  sim_env = gym.make('TwoLinkArm-v0')
+
+  for steps in range(1000):
+    for t in range(100):
+      u = calc_lqr_input(env,sim_env)
+      env.step(u)
+      env.render()
