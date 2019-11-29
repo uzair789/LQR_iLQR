@@ -3,7 +3,7 @@
 import numpy as np
 import gym
 from  deeprl_hw6.arm_env import *
-
+import scipy.linalg
 
 def simulate_dynamics(env, x, u, dt=1e-5):
     """Step simulator to see how state changes.
@@ -30,6 +30,7 @@ def simulate_dynamics(env, x, u, dt=1e-5):
       If you return x you will need to solve a different equation in
       your LQR controller.
     """
+    env.state = x
     xdot,reward,is_done,_ = env.step(u,dt)
     #print(xdot,reward,id_done)
     return xdot/dt
@@ -136,9 +137,9 @@ def calc_lqr_input(env, sim_env):
     B = approximate_B(sim_env,x,u)
     Q = env.Q
     R = env.R
-    K = scipy.linalg.solve_continuous_are(A,B,Q,R)
+    K = scipy.linalg.solve_continuous_are(A,B,Q+1*np.eye(Q.shape[0]),R)
     #xdot = simulate_dynamics(sim_env,x,u)*env.dt
-    xdot = x - env.goal()
+    xdot = x - env.goal
     prod = np.dot(K,xdot)
     U = -np.dot(np.dot(np.linalg.inv(R),B.T),prod)
     return np.ones((2,))
