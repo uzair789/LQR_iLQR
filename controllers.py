@@ -36,9 +36,7 @@ def simulate_dynamics(env, x, u, dt=1e-5):
     env.state = copy.deepcopy(x)
     next_state, _, _, _ = env.step(u, dt)
     change = (next_state - x) / dt
-    #return np.array(next_state)
     return np.array(change)
-    #return np.zeros(x.shape)
 
 
 def approximate_A(env, x, u, delta=1e-5, dt=1e-5):
@@ -72,11 +70,8 @@ def approximate_A(env, x, u, delta=1e-5, dt=1e-5):
         x_pos = simulate_dynamics(env, x_copy1, u)
         x_copy2[i] = x_copy2[i] - delta
         x_neg = simulate_dynamics(env, x_copy2, u)
-
         A[:, i] = (x_pos - x_neg) / (2 * delta)
-
     return A
-    #return np.zeros((x.shape[0], x.shape[0]))
 
 
 def approximate_B(env, x, u, delta=1e-5, dt=1e-5):
@@ -111,9 +106,7 @@ def approximate_B(env, x, u, delta=1e-5, dt=1e-5):
         u_copy2[i] = u_copy2[i] - delta
         x_neg = simulate_dynamics(env, x, u_copy2)
         B[:, i] = (x_pos - x_neg) / (2 * delta)
-
     return B
-    #return np.zeros((x.shape[0], u.shape[0]))
 
 
 def calc_lqr_input(env, sim_env):
@@ -141,8 +134,6 @@ def calc_lqr_input(env, sim_env):
     u: np.array
       The command to execute at this point.
     """
-    #u = env.action_space.sample()
-    #print('sampled u',u)   
     u = np.array([0.0, 0.0])
     x = env.state 
     g = env.goal
@@ -151,25 +142,12 @@ def calc_lqr_input(env, sim_env):
     Q = env.Q
     R = env.R
 
-    #print('x', x)
-    #print('g', g)
-    #print('x-g', x - g)
-
     P = scp.solve_continuous_are(A, B, Q, R)
 
-    #print('A --', A.shape)
-    #print('R --', R.shape)
-    #print('B --', B.shape)
-    #print('P --', P.shape)
-    #print('x --', x.shape)
+    diff_state_goal = x - g
 
-    x_ = x - g
-
-
-    action_u = - np.linalg.inv(R).dot(B.T).dot(P).dot( x_.reshape(-1,1)) # check the multiplication. element wise or dot product
-    #print('action --', action_u.shape)
+    action_u = - np.linalg.inv(R).dot(B.T).dot(P).dot( diff_state_goal.reshape(-1,1)) 
     return action_u
-    #return np.ones((2,))
 
 PATH = './plots'
 def plot_graph(data, title, xlabel, ylabel):
@@ -200,8 +178,8 @@ if __name__ == '__main__':
 
     rewards = []
     while not done:
+        print('Running step...')
         u = calc_lqr_input(env, sim_env).squeeze()
-        print('selected_action ---', u.shape)
         actions.append(u)
         next_x, r, done, _ = env.step(u)
         q.append(env.position)
@@ -209,10 +187,6 @@ if __name__ == '__main__':
         rewards.append(r) 
 
     actions, q, qdot, rewards = np.array(actions), np.array(q, ndmin=2), np.array(qdot, ndmin=2), np.array(rewards, ndmin=2)
-    print('actions', actions, actions.shape)
-    print('q', q, q.shape)
-    print('qdot', qdot, qdot.shape)
-    print(rewards, rewards.shape)
     plot_graph(actions, 'U_control', 'episode steps', 'control')
     plot_graph(q, 'positions', 'episode steps', 'q')
     plot_graph(qdot, 'velocity', 'episode steps', 'qdot')
