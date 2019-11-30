@@ -30,8 +30,14 @@ def simulate_dynamics_next(env, x, u):
     -------
     next_x: np.array
     """
+
+    '''
+    print('--->>>')
+    print(x)
+    print(u)
+    '''
     env.state = copy.deepcopy(x)
-    next_state = env.step(u)
+    next_state, _, _, _  = env.step(u)
     return np.array(next_state)
     #return np.zeros(x.shape)
 
@@ -125,13 +131,33 @@ def cost_inter(env, x, u):
     corresponding variables, ex: (1) l_x is the first order derivative d l/d x (2) l_xx is the second order derivative
     d^2 l/d x^2
     """
-    d = {}
+    l = np.square(np.linalg.norm(u))
 
-    l = np.linalg.norm(u)
+    x = x.reshape(-1, 1)
+    u = u.reshape(-1, 1)
+
+
+    x_dims = x.shape[0]
+    u_dims = u.shape[0]
+
+    l_x = np.zeros(x.shape)
+    l_xx = np.zeros([x_dims, x_dims])
+
+    l_u = 2 * u
+    l_uu = 2 * np.eye(u_dims)
+
+    l_ux = np.zeros([u_dims, x_dims])
+    ''' 
+    print('x', x.shape) 
+    print('u', u.shape) 
  
-    
-
-    d{ 'l_x' : l_x,
+    print('l_x', l_x.shape)
+    print('l_xx', l_xx.shape)
+    print('l_u', l_u.shape)
+    print('l_uu', l_uu.shape)
+    print('l_ux', l_ux.shape)
+    '''
+    d =  { 'l_x' : l_x,
        'l_xx' : l_xx,
        'l_u' : l_u,
        'l_uu' : l_uu,
@@ -159,7 +185,29 @@ def cost_final(env, x):
     l, l_x, l_xx The first term is the loss, where the remaining terms are derivatives respect to the
     corresponding variables
     """
-    return None
+    x = x.reshape(-1,1)
+    x_dims = x.shape[0]
+
+    g = copy.deepcopy(env.goal)
+    g = g.reshape(-1,1)
+    l = np.square(np.linalg.norm(x - g))
+
+    l_x = 2 * (x - g)
+    l_xx = 2 * np.eye(x_dims)
+
+    '''
+    print('-- in  final state')
+    print('x', x.shape)
+    print('g', g.shape)
+    print('l_x', l_x.shape)
+    print('l_xx', l_xx.shape)
+    '''
+    d = {'l_x':l_x,
+         'l_xx': l_xx }
+    
+
+
+    return l, d
 
 
 def simulate(env, x0, U):
@@ -206,6 +254,9 @@ def calc_ilqr_input(env, sim_env, tN=50, max_iter=1e6):
 
     return np.zeros((50, 2))
 
+
+
+
 def forward(sim_env, x0, U):
     """ Forward rollout
 
@@ -243,6 +294,10 @@ def forward(sim_env, x0, U):
             traj_costs.append(final_cost)
             traj_derivatives.append(final_derivatives)
 
+
+    print('len costs per trajectory', len(traj_costs))
+    
+    print('len derivatives per trajectory', len(traj_derivatives))
     return traj_costs, traj_derivatives
 
 
