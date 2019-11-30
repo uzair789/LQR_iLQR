@@ -31,11 +31,11 @@ def simulate_dynamics_next(env, x, u):
     next_x: np.array
     """
 
-    '''
+    
     print('--->>>')
     print(x)
     print(u)
-    '''
+    
     env.state = copy.deepcopy(x)
     next_state, _, _, _  = env.step(u)
     return np.array(next_state)
@@ -70,7 +70,7 @@ def approximate_A(env, x, u, delta=1e-5, dt=1e-5):
         x_copy1 = x.copy()
         x_copy2 = x.copy()
         x_copy1[i] = x_copy1[i] + delta
-        x_pos = simulate_dynamics(env, x_copy1, u)
+        x_pos = simulate_dynamics_next(env, x_copy1, u)
         x_copy2[i] = x_copy2[i] - delta
         x_neg = simulate_dynamics_next(env, x_copy2, u)
         A[:, i] = (x_pos - x_neg) / (2 * delta)
@@ -105,7 +105,7 @@ def approximate_B(env, x, u, delta=1e-5, dt=1e-5):
         u_copy1 = u.copy()
         u_copy2 = u.copy()
         u_copy1[i] = u_copy1[i] + delta
-        x_pos = simulate_dynamics(env, x, u_copy1) 
+        x_pos = simulate_dynamics_next(env, x, u_copy1) 
         u_copy2[i] = u_copy2[i] - delta
         x_neg = simulate_dynamics_next(env, x, u_copy2)
         B[:, i] = (x_pos - x_neg) / (2 * delta)
@@ -254,7 +254,8 @@ def calc_ilqr_input(env, sim_env, tN=50, max_iter=1e6):
 
     return np.zeros((50, 2))
 
-
+def backward():
+    pass
 
 
 def forward(sim_env, x0, U):
@@ -284,6 +285,14 @@ def forward(sim_env, x0, U):
     for i, u in enumerate(U):
         inter_cost, inter_derivatives = cost_inter(sim_env, x, u)
         traj_costs.append(inter_cost)
+
+        #Add the df/dx and df/du also along with the derivatives of the cost
+        df_x = approximate_A(sim_env, x, u)
+        df_u = approximate_B(sim_env, x, u)
+        inter_derivatives.update({'f_x':df_x, 'f_u':df_u})
+        print('----')
+        for key in inter_derivatives:
+             print(i, key)
         traj_derivatives.append(inter_derivatives)
         next_x = simulate_dynamics_next(sim_env, x, u)
         x = next_x
