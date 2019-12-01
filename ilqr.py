@@ -32,9 +32,9 @@ def simulate_dynamics_next(env, x, u):
     """
 
     
-    print('--->>>')
-    print(x)
-    print(u)
+    #print('--->>>')
+    #print(x)
+    #print(u)
     
     env.state = copy.deepcopy(x)
     next_state, _, _, _  = env.step(u)
@@ -131,6 +131,8 @@ def cost_inter(env, x, u):
     corresponding variables, ex: (1) l_x is the first order derivative d l/d x (2) l_xx is the second order derivative
     d^2 l/d x^2
     """
+
+    inter_scale = 1#0.001
     l = np.square(np.linalg.norm(u))
 
     x = x.reshape(-1, 1)
@@ -157,11 +159,11 @@ def cost_inter(env, x, u):
     print('l_uu', l_uu.shape)
     print('l_ux', l_ux.shape)
     '''
-    d =  { 'l_x' : l_x,
-       'l_xx' : l_xx,
-       'l_u' : l_u,
-       'l_uu' : l_uu,
-       'l_ux' : l_ux }
+    d =  { 'l_x' : l_x*inter_scale,
+       'l_xx' : l_xx*inter_scale,
+       'l_u' : l_u*inter_scale,
+       'l_uu' : l_uu*inter_scale,
+       'l_ux' : l_ux*inter_scale }
 
 
 
@@ -185,15 +187,17 @@ def cost_final(env, x):
     l, l_x, l_xx The first term is the loss, where the remaining terms are derivatives respect to the
     corresponding variables
     """
+    scaling = 10000
+
     x = x.reshape(-1,1)
     x_dims = x.shape[0]
 
     g = copy.deepcopy(env.goal)
     g = g.reshape(-1,1)
-    l = np.square(np.linalg.norm(x - g))
+    l = scaling * np.square(np.linalg.norm(x - g))
 
-    l_x = 2 * (x - g)
-    l_xx = 2 * np.eye(x_dims)
+    l_x = scaling * 2 * (x - g)
+    l_xx = scaling * 2 * np.eye(x_dims)
 
     '''
     print('-- in  final state')
@@ -237,26 +241,170 @@ def calc_ilqr_input(env, sim_env, tN=50, max_iter=1e6):
     """
     # generate a control sequence U
     U = np.zeros([tN, 2])
-    x0 = env.state
+    x0 = copy.deepcopy(env.state)
 
-    # compute the forward roll out
-    traj_cost, traj_derivatives = forward(sim_env, x0, U)
+    all_costs  = []# np.zeros([int(max_iter), 1])
+    
+    for r in range(int(max_iter)):
+        # compute the forward roll out
+        traj_states, traj_costs, traj_derivatives = forward(sim_env, x0, U)
+
+        summed_cost = np.sum(traj_costs)
+        print('ITER - ', r, ' | costs = ', summed_cost)
+
+        #print(all_costs.shape)
+        all_costs.append(summed_cost)
+
+        #print('traj_states', traj_states.shape)
+        #print('traj_costs', traj_costs.shape)
+        #print('traj_derivatives', traj_derivatives.shape)
+
+        # backward
+        k, K = backward(traj_derivatives)
+
+        #print('k',k.shape)
+        #print('K', K.shape)
+        #print('U', U.shape)
+        #print('states', traj_states.shape)
+        #update the control_sequences
+        U_new = []
+        curr = copy.deepcopy(x0)
+
+        '''
+        print(curr.shape)
+        print(traj_states[:,1].shape)
+        print(K[0,:,:].shape)
+        print(k[0, :])
+        print(U[0, :])
+        a = np.dot(K[0,  :, :], curr - traj_states[:, 0])
+        print(a.shape)
+        '''
+        for t in  range(tN):
+            u_new = U[t,:] + k[t, :] + np.dot(K[t,  :, :], curr - traj_states[:, t])
+            #print('---->>>>', u_new.shape)
+            #print(r, t, u_new)
+            curr = simulate_dynamics_next(sim_env, curr, u_new)
+            U_new.append(u_new)
+
+        print('diff between  U',  np.linalg.norm(U_new - U))
+
+        U =  copy.deepcopy(np.array(U_new))
+
+
+        
+        # test if the  control  takes  state close  to goal
+        U_test = copy.deepcopy(U_new)
+        env.state = copy.deepcopy(x0)
+        for tt, u_test  in enumerate(U_test):
+            next_state , re, _, _  = env.step(u_test)
+             
+        '''
+        if  np.linalg.norm(next_state - env.goal) < 1e3:
+               break    
+        '''
+         
+        print('dist from goal', np.linalg.norm(next_state - env.goal))
 
 
 
-    exit()
 
 
-    # backward
-    k, K = backward(traj_derivatives)
 
-    #update the control_sequences
+    #print('updated U', U.shape) 
+    all_costs = np.array(all_costs).reshape(-1, 1)
+    plot_graph(all_costs, 'Costs', 'iterations', 'costs')
+     
+    return U
 
-    return np.zeros((50, 2))
+def backward(traj_derivatives):
+    """This function performs the backward pass to compute the Qs at each time step.
 
-def backward():
-    pass
+    Arguments:
+    ---------
 
+    Returns:
+    -------
+    the gains-- k and K 
+    """
+    final_grads = traj_derivatives.pop()
+
+    #print(final_grads)
+
+    k_list =  []
+    K_list = []
+
+    V_x = final_grads['l_x']
+    V_xx = final_grads['l_xx']
+
+    # now going backwards ([49 --> 0])
+    for t in range(len(traj_derivatives)-1, -1, -1):
+        l_x = traj_derivatives[t]['l_x']
+        f_x = traj_derivatives[t]['f_x']
+        l_u = traj_derivatives[t]['l_u']
+        f_u = traj_derivatives[t]['f_u']
+        l_xx = traj_derivatives[t]['l_xx']
+        l_ux = traj_derivatives[t]['l_ux']
+        l_uu = traj_derivatives[t]['l_uu']
+        '''
+        print(t, '---')
+        print('l_x', l_x.shape)
+        print('f_x', f_x.shape)
+        print('l_u', l_u.shape)
+        print('f_u', f_u.shape)
+        print('V_x', V_x.shape)
+        print('V_xx', V_xx.shape)
+        print('l_xx', l_xx.shape)
+        print('l_ux', l_ux.shape)
+        print('l_uu', l_uu.shape)
+        '''      
+
+        Q_x = l_x + np.dot(f_x.T, V_x) 
+        Q_u = l_u + np.dot(f_u.T, V_x)
+        Q_xx = l_xx + f_x.T.dot(V_xx).dot(f_x) #f_xx is 0
+        Q_ux = l_ux + f_u.T.dot(V_xx).dot(f_x)
+        Q_uu = l_uu + f_u.T.dot(V_xx).dot(f_u)
+
+        '''
+        print('Q_x', Q_x.shape)
+        print('Q_u', Q_u.shape)
+        print('Q_xx', Q_xx.shape)
+        print('Q_ux', Q_ux.shape)
+        print('Q_uu', Q_uu.shape)
+        '''
+        # compute the gains
+        lambd = 0.2
+        #Q_uu_inv = np.linalg.pinv(Q_uu + lambd *  np.eye(Q_uu.shape[0]))
+        Q_uu_inv = np.linalg.inv(Q_uu)
+        k = - Q_uu_inv.dot(Q_u)
+        K = - Q_uu_inv.dot(Q_ux)
+        '''
+        print('k', k, k.shape )
+        print('K', K, K.shape )
+        '''
+        V_x = Q_x - K.T.dot(Q_uu).dot(k)
+        V_xx = Q_xx - K.T.dot(Q_uu).dot(K)
+
+        '''
+        print('V_x updated', V_x.shape)
+        print('V_xx updated', V_xx.shape)
+        '''
+        k_list.append(k)
+        K_list.append(K)
+
+
+    # reverse the gains so that the list contains k and K from 0 to T-1
+    k_list.reverse()
+    K_list.reverse()
+
+    k_list = np.array(k_list).squeeze()
+    K_list = np.array(K_list)
+
+    '''
+    print('k_list', k_list.shape)
+    print('K_list', K_list.shape)
+    '''
+
+    return k_list, K_list
 
 def forward(sim_env, x0, U):
     """ Forward rollout
@@ -277,11 +425,12 @@ def forward(sim_env, x0, U):
         List of dicts of all derivatives at each timestep
 
     """
-
+    states = np.zeros([x0.shape[0], U.shape[0]+1])
     traj_costs = []
     traj_derivatives = []
 
-    x = x0
+    x = copy.deepcopy(x0)
+    states[:, 0] = copy.deepcopy(x)
     for i, u in enumerate(U):
         inter_cost, inter_derivatives = cost_inter(sim_env, x, u)
         traj_costs.append(inter_cost)
@@ -290,12 +439,13 @@ def forward(sim_env, x0, U):
         df_x = approximate_A(sim_env, x, u)
         df_u = approximate_B(sim_env, x, u)
         inter_derivatives.update({'f_x':df_x, 'f_u':df_u})
-        print('----')
-        for key in inter_derivatives:
-             print(i, key)
+        #print('----')
+        #for key in inter_derivatives:
+        #     print(i, key)
         traj_derivatives.append(inter_derivatives)
         next_x = simulate_dynamics_next(sim_env, x, u)
         x = next_x
+        states[:, i+1] = copy.deepcopy(x)
 
         #compute the final state cost
         if i == len(U) - 1:
@@ -304,15 +454,16 @@ def forward(sim_env, x0, U):
             traj_derivatives.append(final_derivatives)
 
 
-    print('len costs per trajectory', len(traj_costs))
+    #print('len costs per trajectory', len(traj_costs))
     
-    print('len derivatives per trajectory', len(traj_derivatives))
-    return traj_costs, traj_derivatives
+    #print('len derivatives per trajectory', len(traj_derivatives))
+    return states, traj_costs, traj_derivatives
 
 
+MAX_ITERS = 1000000
 
-
-PATH = './ilqr_plots'
+PATH = './ilqr_plots_d'+str(MAX_ITERS)
+os.mkdir(PATH)
 def plot_graph(data, title, xlabel, ylabel):
         plt.figure(figsize=(12,5))
         plt.title(title)
@@ -338,7 +489,7 @@ if __name__=='__main__':
     rewards = []
 
     #get the optimal U's for this env (test roll out)
-    U_optimal = calc_ilqr_input(env, sim_env)
+    U_optimal = calc_ilqr_input(env, sim_env, tN = 50, max_iter=MAX_ITERS)
 
     for i in range(len(U_optimal)):
         next_x, r, done, _ = env.step(U_optimal[i])
