@@ -177,15 +177,18 @@ if __name__ == '__main__':
     qdot.append(env.velocity)
 
     rewards = []
+    t = 0
     while not done:
-        print('Running step...')
+        env.render()
+        t +=1
+        print('Running step = ', t)
         u = calc_lqr_input(env, sim_env).squeeze()
         actions.append(u)
         next_x, r, done, _ = env.step(u)
         q.append(env.position)
         qdot.append(env.velocity)
         rewards.append(r) 
-
+    print('final_rewards = ', sum(rewards))
     actions, q, qdot, rewards = np.array(actions), np.array(q, ndmin=2), np.array(qdot, ndmin=2), np.array(rewards, ndmin=2)
     plot_graph(actions, 'U_control', 'episode steps', 'control')
     plot_graph(q, 'positions', 'episode steps', 'q')

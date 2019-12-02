@@ -242,15 +242,19 @@ def calc_ilqr_input(env, sim_env, tN=50, max_iter=1e6):
     # generate a control sequence U
     U = np.zeros([tN, 2])
     x0 = copy.deepcopy(env.state)
-
     all_costs  = []# np.zeros([int(max_iter), 1])
-    
+    cost_thresh = np.inf
+    alpha = 1
+    lamb = 1
     for r in range(int(max_iter)):
+
+        X_new = []
         # compute the forward roll out
+        #x0 = copy.deepcopy(env.reset())
         traj_states, traj_costs, traj_derivatives = forward(sim_env, x0, U)
 
         summed_cost = np.sum(traj_costs)
-        print('ITER - ', r, ' | costs = ', summed_cost)
+        print('ITER - ', r, ' | costs = ', summed_cost, '| alpha = ', alpha, '| lamb = ', lamb)
 
         #print(all_costs.shape)
         all_costs.append(summed_cost)
@@ -260,7 +264,7 @@ def calc_ilqr_input(env, sim_env, tN=50, max_iter=1e6):
         #print('traj_derivatives', traj_derivatives.shape)
 
         # backward
-        k, K = backward(traj_derivatives)
+        k, K = backward(traj_derivatives, lamb)
 
         #print('k',k.shape)
         #print('K', K.shape)
@@ -269,6 +273,7 @@ def calc_ilqr_input(env, sim_env, tN=50, max_iter=1e6):
         #update the control_sequences
         U_new = []
         curr = copy.deepcopy(x0)
+        #curr = env.reset()
 
         '''
         print(curr.shape)
@@ -279,29 +284,46 @@ def calc_ilqr_input(env, sim_env, tN=50, max_iter=1e6):
         a = np.dot(K[0,  :, :], curr - traj_states[:, 0])
         print(a.shape)
         '''
+        cost = 0
         for t in  range(tN):
-            u_new = U[t,:] + k[t, :] + np.dot(K[t,  :, :], curr - traj_states[:, t])
+            u_new = U[t,:] +   alpha * (k[t, :] + np.dot(K[t,  :, :], curr - traj_states[:, t]))
             #print('---->>>>', u_new.shape)
             #print(r, t, u_new)
-            curr = simulate_dynamics_next(sim_env, curr, u_new)
+            next_s = simulate_dynamics_next(sim_env, curr, u_new)
+
+            c_i, _ = cost_inter(sim_env, curr, u_new)
+            cost += c_i
+            curr = copy.deepcopy(next_s)
             U_new.append(u_new)
+            if t==tN-1:
+                c_f, _ = cost_final(sim_env, curr)
+                cost += c_f
+ 
+        print('current_cost = ', cost, ' | cost_thresh = ', cost_thresh)
+        #print('diff between  U',  np.linalg.norm(U_new - U))
+     
 
-        print('diff between  U',  np.linalg.norm(U_new - U))
-
-        U =  copy.deepcopy(np.array(U_new))
-
+        if cost < cost_thresh:
+           U =  copy.deepcopy(np.array(U_new))
+           cost_thresh = cost
+           #lamb = lamb /2.0
+        else:
+           if r%10 == 0:
+               print('clip alpha')
+               alpha = max(0.000000001, alpha/2.0)
 
         
         # test if the  control  takes  state close  to goal
         U_test = copy.deepcopy(U_new)
-        env.state = copy.deepcopy(x0)
+        state = copy.deepcopy(x0)
+        
         for tt, u_test  in enumerate(U_test):
-            next_state , re, _, _  = env.step(u_test)
-             
-        '''
-        if  np.linalg.norm(next_state - env.goal) < 1e3:
+             next_state  = simulate_dynamics_next(env, state, u_test)
+             state = copy.deepcopy(next_state)
+        
+        if  np.linalg.norm(next_state - env.goal) < 0.005:
                break    
-        '''
+        
          
         print('dist from goal', np.linalg.norm(next_state - env.goal))
 
@@ -316,7 +338,24 @@ def calc_ilqr_input(env, sim_env, tN=50, max_iter=1e6):
      
     return U
 
-def backward(traj_derivatives):
+
+def inv_stable(M, lamb=1):
+    """Inverts matrix M in a numerically stable manner.
+
+    This involves looking at the eigenvector (i.e., spectral) decomposition of the
+    matrix, and (1) removing any eigenvectors with non-positive eingenvalues, and
+    (2) adding a constant to all eigenvalues.
+    """
+    M_evals, M_evecs = np.linalg.eig(M)
+    M_evals[M_evals < 0] = 0.0
+    M_evals += lamb
+    M_inv = np.dot(M_evecs,
+                   np.dot(np.diag(1.0 / M_evals), M_evecs.T))
+    return M_inv
+
+
+
+def backward(traj_derivatives, lamb):
     """This function performs the backward pass to compute the Qs at each time step.
 
     Arguments:
@@ -372,9 +411,11 @@ def backward(traj_derivatives):
         print('Q_uu', Q_uu.shape)
         '''
         # compute the gains
-        lambd = 0.2
         #Q_uu_inv = np.linalg.pinv(Q_uu + lambd *  np.eye(Q_uu.shape[0]))
-        Q_uu_inv = np.linalg.inv(Q_uu)
+        #Q_uu_inv = np.linalg.inv(Q_uu)
+
+        Q_uu_inv = inv_stable(Q_uu, lamb=lamb)
+
         k = - Q_uu_inv.dot(Q_u)
         K = - Q_uu_inv.dot(Q_ux)
         '''
@@ -444,7 +485,7 @@ def forward(sim_env, x0, U):
         #     print(i, key)
         traj_derivatives.append(inter_derivatives)
         next_x = simulate_dynamics_next(sim_env, x, u)
-        x = next_x
+        x = copy.deepcopy(next_x)
         states[:, i+1] = copy.deepcopy(x)
 
         #compute the final state cost
@@ -460,9 +501,10 @@ def forward(sim_env, x0, U):
     return states, traj_costs, traj_derivatives
 
 
-MAX_ITERS = 1000000
+MAX_ITERS = 5000
+TN = 700
 
-PATH = './ilqr_plots_d'+str(MAX_ITERS)
+PATH = './ilqr_plots_iters'+str(MAX_ITERS)+'_Tn'+str(TN)
 os.mkdir(PATH)
 def plot_graph(data, title, xlabel, ylabel):
         plt.figure(figsize=(12,5))
@@ -478,6 +520,9 @@ if __name__=='__main__':
     env = gym.make('TwoLinkArm-v0')
     sim_env = copy.deepcopy(env)
 
+
+    env.reset()
+    sim_env.reset() 
     done = False
 
     q = []
@@ -489,10 +534,12 @@ if __name__=='__main__':
     rewards = []
 
     #get the optimal U's for this env (test roll out)
-    U_optimal = calc_ilqr_input(env, sim_env, tN = 50, max_iter=MAX_ITERS)
+    U_optimal = calc_ilqr_input(env, sim_env, tN = TN, max_iter=MAX_ITERS)
 
+    env.reset()
     for i in range(len(U_optimal)):
         next_x, r, done, _ = env.step(U_optimal[i])
+        #env.render()
         if done:
             print('CRASHED!!')
             break
@@ -504,6 +551,7 @@ if __name__=='__main__':
     
 
     actions, q, qdot, rewards = np.array(U_optimal), np.array(q, ndmin=2), np.array(qdot, ndmin=2), np.array(rewards, ndmin=2)
+    print('Final Rewards = ', np.sum(rewards))
     plot_graph(actions, 'U_control', 'episode steps', 'control')
     plot_graph(q, 'positions', 'episode steps', 'q')
     plot_graph(qdot, 'velocity', 'episode steps', 'qdot')
